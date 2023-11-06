@@ -189,3 +189,132 @@ def update_post(id: int, post: Post):
     my_posts[id] = post_dict
     return {"data": post_dict}
 ```
+
+## STRUCTURE
+we currently have our working files in the base directory. We will create a folder called __app__ and move all our files there. We will also create a file called **__init__.py** in the base directory. This file will that folder to a python package.
+
+Now with this new structure, to run our application using uvicorn, the command will change to:
+```bash
+uvicorn app.main:app --reload
+```
+__app__ is the name of the folder, __main__ is the name of the file and __app__ is the name of the instance of the class FastAPI.
+
+***
+***
+# DATABASE
+We don't interact with the database directly, instead we use a database management system. It sits in the middle between our application and the database. It is responsible for managing the database. It is also responsible for translating the data from the database to the application and vice versa.
+
+We are going to use postgres as our database
+### POSTGRES
+Each instance of postgres can be carved into multiple separate databases. They can be operated separately.
+install postgres and the pgAdmin to have a graphical user interface to manage the database.
+
+in postgres when you insert items and want them to be returned back to you, you use the __returning__ keyword.
+This will be useful when buidling our API since we want to send back the data that was inserted into the database.
+```sql
+INSERT INTO products (name, price, inventory) VALUES ('drves', 44, 1523) returning *;
+```
+
+while deleting items and want to see teh item you are deleting as it gets deleted, you could use the __return__ keyword.
+```sql
+DELETE FROM products where id = 11 RETURNING *;
+```
+***
+***
+### accessing the postgres db from our python file
+```python
+while True:
+    try:
+        conn = psycopg2.connect(host='localhost', database='fastapi', user='postgres', password='', cursor_factory=RealDictCursor)
+        cursor = conn.cursor()
+        print("DATABSE CONN IS A SUCCESS")
+        break
+    except Exception as error:
+        print("DATABSE CONN IS A FAILURE", error)
+        time.sleep(2)
+```
+
+In the code above we use a while loop to keep trying to connect if the connection fails.
+
+__cursor_factory=RealDictCursor__ is used to return the data as a dictionary. This will be useful when we are returning the data to the user.
+
+***
+***
+### retrieving all data from the database
+```python
+@app.get("/posts")
+def get_posts():
+    cursor.execute("SELECT * FROM posts")
+    my_posts = cursor.fetchall()
+    return {"data": my_posts}
+```
+
+***
+***
+### retrieving a single item from the database
+```python
+@app.get("/posts/{id}")
+def get_post(id: int, response: Response):
+    cursor.execute("SELECT * FROM posts WHERE id = %s", (id,))
+    post = cursor.fetchone()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return {"data": post}
+```
+
+__(id,)__ is a tuple. It is used to pass the id to the query. It is used to prevent sql injection.
+We can also try __str(id),__ but it is not recommended since it is prone to sql injection.
+
+***
+***
+### inserting data into the database
+```python
+cursor.execute("INSERT INTO posts (title, content, published) VALUES (%s, %s, %s) RETURNING *", (post.title, post.content, post.published))
+
+new_post = cursor.fetchone()
+conn.commit()
+return {"data": new_post}
+```
+
+This way of inserting sanitizes the input hence preventing sql injection.
+__RETURNING *__ is used to return the data that was inserted into the database.
+__new_post = cursor.fetchone()__ is used to get the data that was inserted into the database.
+__conn.commit()__ is used to commit the changes to the database. it pushes the changes to the database.
+
+***
+***
+
+### DELETING DATA FROM THE DATABASE
+```python
+@app.delete("/posts/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_post(id: int):
+    cursor.execute("DELETE FROM posts WHERE id = %s returning *", (id,))
+    deleted_post = cursor.fetchone()
+    conn.commit()
+
+    if not deleted_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+```
+
+***
+***
+
+### UPDATING DATA IN THE DATABASE
+```python
+@app.put("/posts/{id}", status_code=status.HTTP_202_ACCEPTED)
+def update_post(id: int, post: Post):
+    cursor.execute("UPDATE posts SET title = %s, content = %s, published = %s WHERE id = %s RETURNING *", (post.title, post.content, post.published, id))
+    
+    updated_post = cursor.fetchone()
+    conn.commit()
+
+    if not updated_post:
+        raise HTTPException(status_code=404, detail=f"Post with id {id} not found")
+
+    return {"data": updated_post}
+```
+
+***
+***
