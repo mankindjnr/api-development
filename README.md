@@ -318,3 +318,625 @@ def update_post(id: int, post: Post):
 
 ***
 ***
+
+## OBJECT RELATIONAL MAPPER (ORM)
+ORM is a library that allows us to interact with the database using python objects. It allows us to interact with the database without writing sql queries.
+
+## SQLALCHEMY
+
+### INSTALLATION
+```bash
+pip install SQLAlchemy==1.4
+```
+sqlalchemy does not know how to talk to databases, it needs a database driver, the driver is determined by the database you choose, for us, we are using __postgres__ hence our driver is __psycopg2__.
+
+```bash
+pip install psycopg2-binary
+```
+
+The __fastApi__ documentation provides a way to integrate sqlalchemy with fastapi under the __ORM__ section.
+
+### Connecting to the database
+
+the format of the connection string and the engine:
+
+```database.py``
+```python
+sqlalchemy_url = 'postgresql://<username>:<password>@<ip-address/hostname>/<database-name>'
+sqlalchemy_url = 'postgresql://postgres:mankindjnr@127.0.0.1/fastapi'
+
+engine = create_engine(sqlalchemy_url)
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+```
+
+Wit orms we no longer have to create tables with the pgadmin or the like, we can declare those tables using python models.
+
+***
+
+```models.py```
+
+```python
+from .database import Base
+from sqlalchemy import Column, Integer, String, Text, DateTime
+import datetime
+
+class Post(Base):
+    __tablename__ = 'posts'
+
+    id = Column(Integer, primary_key=True, nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(String, nullable=False)
+    published = Column(Boolean, default=True, nullable=False)
+    created = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
+```
+
+__Base__ is the base class that is provided by sqlalchemy. It is used to create the tables in the database.
+__Column(String(255))__ the string constraint is used for fields that do not expect large input while __Text__ is used for fields that expect large input, i.e. blog posts, articles. Use __Text__ when there is no limit to the number of characters that can be entered. __String__ when you want to limit the number of characters that can be entered. __String(255)__ means that the field can only take 255 characters.
+
+```update to main.py```
+```python
+from . import models
+from .database import engine, SessionLocal
+
+models.Base.metadata.create_all(bind=engine)
+
+app = FastAPI()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+### testing if our connection worked
+```python
+@app.get("/sqlalchemy")
+def test(db: Session = Depends(get_db)):
+    return {"message": "Hello orm"}
+```
+
+When we run the code, the models we defined are checked if those tables exist in the database, if not, they are created, if they exist, nothing happens.
+
+***
+sqlalchemy does not handle databse changes, when you update a table and it already existed, those changes will not reflect in the database, to make those changes stick, we use another tool to __migrate__ our changes. The tool is __alembic__.
+
+### testing
+```python
+@app.get("/sqlalchemy")
+def test(db: Session = Depends(get_db)):
+    posts = db.query(models.Post).all()
+    return {"data": posts}
+```
+While working with sqlalchemy you need to call the connection to the database __db__.
+hence
+```python
+db.query(models.Post).all()
+```
+the query __db.query(models.Post)__ is used to query the database and the __.all()__ is used to get all the data from the database and execute the query.
+
+***
+***
+
+### retrieving all items with orm
+```python
+@app.post("/posts", status_code=status.HTTP_201_CREATED)
+def create_post(post: Post, db: Session = Depends(get_db)):
+    new_post = models.Post(title=post.title, content=post.content, published=post.published)
+    return {"data": new_post}
+```
+
+***
+***
+
+### creating a single item with orm
+```python
+@app.post("/posts", status_code=status.HTTP_201_CREATED)
+def create_post(post: Post, db: Session = Depends(get_db)):
+    new_post = models.Post(title=post.title, content=post.content, published=post.published)
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+    return {"data": new_post}
+```
+
+We create the post and store it in the variable new_post
+we then add the new post to the database
+we then commit the changes to the database(saving them)
+we then retrieve that post (__equivalent of return in raw sql__) using refresh adn store it in variable __new_post__
+we then return the new_post
+
+The above way of mapping items to the columsn will prove inefficient when our models grow, to solve that we can unpack the pydantic model using the __.dict()__ method.
+
+```python
+@app.post("/posts", status_code=status.HTTP_201_CREATED)
+def create_post(post: Post, db: Session = Depends(get_db)):
+    new_post = models.Post(**post.dict())
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+    return {"data": new_post}
+```
+
+Now, it will not matter how many fields our models have, all the fields described in our pydantic model will be mapped to the columns in our database.
+
+***
+***
+
+### retrieving a single item with orm
+```python
+@app.get("/posts/{id}")
+def get_post(id: int, db: Session = Depends(get_db)):
+    post = db.query(models.Post).filter(models.Post.id == id).first()
+
+    if not post:
+        raise HTTPException(status_code=404, detail=f"Post of id {id} not found")
+    return {"data": post}
+```
+
+__db.query__ is used to query the database
+__(models.Post)__ is the table we are querying, we have imported the models.py file and __Post__ is one of the model in that file.
+__.filter(models.Post.id == id)__ is used to filter the data we want to retrieve. We are filtering the data by the id.
+
+***
+***
+
+### Deleting a single item with orm
+```python
+@app.delete("/posts/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_post(id: int, db: Session = Depends(get_db)):
+    deleted_post = db.query(models.Post).filter(models.Post.id == id)
+
+    if deleted_post.first() == None:
+        raise HTTPException(status_code=404, detail=f"Post of id {id} not found")
+
+    deleted_post.delete(synchronize_session=False)
+    db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+```
+
+***
+***
+
+### Updating a single item with orm
+```python
+@app.put("/posts/{id}", status_code=status.HTTP_202_ACCEPTED)
+def update_post(id: int, post: Post, db: Session = Depends(get_db)):
+    required_post = db.query(models.Post).filter(models.Post.id == id)
+    updated_post = required_post.first()
+
+    if not updated_post:
+        raise HTTPException(status_code=404, detail=f"Post with id {id} not found")
+
+    required_post.update(post.dict(), synchronize_session=False)
+    db.commit()
+
+    return {"data": required_post.first()}
+```
+
+***
+***
+
+## pydantic/schema model
+```python
+
+class Post(BaseModel):
+    title: str
+    content: str
+    published: bool = True
+```
+
+This defines the structure of the data that the user should send through the api as well as the response by the fastAPI. It is used to validate the data sent to the server and the data sent back to the user. All data should meet the requirements of the schema.
+
+## sqlalchemy model
+```python
+class Post(Base):
+    __tablename__ = 'posts'
+
+    id = Column(Integer, primary_key=True, nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(String, nullable=False)
+    published = Column(Boolean, server_default='TRUE', nullable=False)
+    created = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
+```
+
+This defines the structure of the data that will be stored in the database. It is used to validate the data that will be stored in the database.
+It also creates the table in the database.
+
+The two are different, while we don't need the pydantic model, it's useful since it allows us to validate the data sent to the server and the data sent back to the user and when it comes to api's, we want to be safe as possible.
+
+### separating the schemas
+```python
+class CreatePost(BaseModel):
+    title: str
+    content: str
+    published: bool = True
+
+# we want the user while updating, to pass all the items
+class UpdatePost(BaseModel):
+    title: str
+    content: str
+    published: bool
+```
+
+#### REASON
+
+We have the above schemas separate from the main file. To avoid clutter.
+We have more that one schema above that represent similar data but for different api routes, this is because, sometimes you want the the data a user can update to be different from that of the one they can create.
+
+IN the above snippet, the user is expected to pass all the values while updating, but when creating, the user is not expected to pass the published value, it is optional and has a default value of True.
+
+If we wanted the user to only update on item we could:
+```python
+class UpdatePost(BaseModel):
+    title: str
+```
+Here the user can only update the title alone.
+
+### A better way to structure multiple related schemas
+```python
+class PostBase(BaseModel):
+    title: str
+    content: str
+    published: bool = True
+
+class PostCreate(PostBase):
+    pass
+```
+
+This way, the __PostCreaet__ has all the atributes of PostBase using the __pass__ keyword. If we wanted to change the default value of published, we could do so in the __PostCreate__ class.
+
+***
+***
+
+## SENDING A RESPONSE BACK
+
+Defining a pydantic schema that will define the structure of the data that will be sent back to the user.
+This is relevant because sometimes we may want to send only pieces of data back to the user and not the entire data.
+
+Example: When a user creates an account, we don't want to send them back their password but we may want to send them their username and email.
+
+```python
+class PostResp(BaseModel):
+    title: str
+    content: str
+    published: bool
+
+    class Config:
+        orm_mode = True
+```
+
+Now to use this:
+```python
+@app.post("/posts", status_code=status.HTTP_201_CREATED, response_model=schemas.PostResp)
+def create_post(post: schemas.PostCreate, db: Session = Depends(get_db)):
+    new_post = models.Post(**post.dict())
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+    return new_post
+```
+
+When we create a new field now, the data we send back to the user only has three fields, the __timestamp__ field is not sent back to the user since we did not include it in the __PostResp__ schema.
+
+to include the timestamp field, we can add it to the __PostResp__ schema.
+
+```python
+from datetime import datetime
+
+class PostResp(BaseModel):
+    title: str
+    content: str
+    published: bool
+    created: datetime
+
+    class Config:
+        orm_mode = True
+```
+
+to limit duplication, you can extend any class and add the fields you want to add.
+we will inherit the __PostBase__ class and add the __created__ field to it.
+
+the __postbase__ class has the __title__, __content__ and __published__ fields.
+
+```python
+class PostBase(PostBase):
+    created: datetime
+
+    class Config:
+        orm_mode = True
+```
+
+When it comes to retrieving all responses with the defined response schema:
+```python
+
+@app.get("/posts", response_model=list[schemas.PostResp])
+def get_posts(db: Session = Depends(get_db)):
+    my_posts = db.query(models.Post).all()
+    return my_posts
+```
+
+We have to use the __list__ keyword to tell fastapi that we are returning a list of items.
+
+
+# USER FUNCTIONALITY
+## Creating a User
+```python
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+class UserResp(BaseModel):
+    id: int
+    email: EmailStr
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
+
+@app.post("/users", status_code=status.HTTP_201_CREATED, response_model=schemas.UserResp)
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    hashed_password = pwd_context.hash(user.password)
+    user.password = hashed_password
+    
+    new_user = models.User(**user.dict())
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+```
+
+***
+***
+
+### fetching user data 
+```python
+@app.get("/users/{id}", response_model=schemas.UserResp)
+def get_user(id: int, db: Session = Depends(get_db)):
+    user = db.query(models.User).filter(models.User.id == id).first()
+
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User of id {id} not found")
+    return user
+```
+
+## ROUTERS
+They will help us to separate our routes into different files. This will help us to avoid cluttering our main file.
+
+```main.py```
+```python
+app.include_router(post.router)
+app.include_router(users.router)
+```
+
+```post.py```
+
+__THE PREFIX IS OPTIONAL - WHILE I HAVE USED IT IN THE LEARNING PROCESS, I DO NOT PREFER TO USE IT IN MY PROJECTS__
+```python
+router = APIRouter(
+    prefix="/posts",
+)
+
+
+@router.get("/", response_model=list[schemas.PostResp])
+def get_posts(db: Session = Depends(get_db)):
+    my_posts = db.query(models.Post).all()
+    return my_posts
+
+
+@router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.PostResp)
+def create_post(post: schemas.PostCreate, db: Session = Depends(get_db)):
+    new_post = models.Post(**post.dict())
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+    return new_post
+```
+
+### STYLING THE DOCS SO THAT ALL ROUTES ARE SECTIONED ACCORDING TO THEIR ACTIONS
+```users.py```
+```python
+router = APIRouter(
+    tags=["users"]
+)
+```
+
+```post.py```
+```python
+router = APIRouter(
+    tags=["posts"]
+)
+```
+
+***
+# IMPORTANT SECTION
+***
+## AUTHENTICATION
+There are two ways of authenticating users, __session__ and __token__ authentication.
+
+## JWT TOKEN AUTHENTICATION
+We will use the jwt token authentication since its stateless and we don't have to store the token in the database nor in the api server. It is stored in the client side.
+
+#### How it's used
+The user logs in with their credentials and then they are assigned a __token__ which they will use to access the protected routes. The token is sent to the server with every request in the __header__ and the server will verify the token and if it's valid, it will grant the user access to the protected routes.
+
+In the Jwt, when sending the token to the server, be careful witht the data you pass to the __payload__, it is not encrypted and can be decoded by anyone. Don't pass sensitive data to the payload. Also do not jam alot of info in the payload, it will make the token large and it will take time to send it to the server.
+
+### logging user
+```routes/auth.py```
+```python
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from .. import schemas, database, models, utils
+
+router = APIRouter(
+    tags = ['Authentication']
+)
+
+@router.post('/login')
+def login(user_credentials: schemas.UserLogin, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.email == user_credentials.email).first()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Invalid credentials")
+
+    if not utils.verify(user_credentials.password):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incorrect credentials")
+
+    
+
+    return user
+```
+
+***
+### implementing oauth2
+```bash
+pip install python-jose[cryptography]
+```
+
+```python
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+
+# secret key
+# algorithm
+# expiration time
+
+SECRET_KEY = "b7ffab7e88ff8ec8e6c258944ec6677542bd7a16431ef01c0b78aaea77b26e04"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+# payload
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+```
+
+__SECRET_KEY__ run the following command to generate a secret key
+__expire__ current_time + time_to_expire(30 mins)
+__to_encode.update__ is a copy of the data passed to the function and we are adding the expire time to it.
+
+```bash
+openssl rand -hex 32
+```
+
+### update to login route due to OAUTH2
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from fastapi.security.oauth2 import OAuth2PasswordRequestForm
+
+@router.post('/login')
+def login(user_credentials: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.email == user_credentials.username).first()
+
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Invalid credentials")
+
+    if not utils.verify(user_credentials.password, user.password):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incorrect credentials")
+
+    # the data we want in the payload to be passed here (email/id/username)
+    access_token = oauth2.create_access_token(data={"user_id": user.id})
+
+    return {"access_token" : access_token, "token_type": "bearer"}
+```
+
+The oauth password request form only returns username and password,so, our email will be stored under username hence we have to adjust our code accordingly.
+
+Now when we are testing the api route, we will no longer user the __body__  section, we will use the __form-data__ section.
+We will enter the username as key and pass the email as the value. We will do the same for the password.
+
+
+### verifying the token (its not tampered with and not expired)
+we will start by defining a schema for the token
+
+***
+As long there is data been sent to the api or from it, we will create __schemas__ for them to ensure compliance
+***
+
+```python
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    user_id: Optional[str] = None
+```
+
+The token data is what we send to the token creation function as payload. Its optional cause you get to decide what you want to send to the payload.
+
+```python
+def verify_access_token(token: str, credentials_exception):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        _id = payload.get("user_id")
+
+        if _id is None:
+            raise credentials_exception
+
+        token_data = schemas.TokenData(_id=user_id)
+    except JWTError:
+        raise credentials_exception
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(database.get_db)):
+    credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials", headers={"WWW-Authenticate": "Bearer"})
+
+    return verify_access_token(token, credentials_exception)
+```
+
+__return verify_access_token(token, credentials_exception)__ returns the token_data on success and raises an error on failure.
+
+To use it to block access to route (protecting a route to authoried users only):
+```python
+@router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.PostResp)
+def create_post(post: schemas.PostCreate, db: Session = Depends(get_db), user_id: int = Depends(oauth2.get_current_user)):
+    new_post = models.Post(**post.dict())
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+    return new_post
+```
+
+we have added the dependancy to the route, now, when we try to access the route without the token, we will get an error. __get_current_user: int = Depends(oauth2.get_current_user)__
+
+### testing
+to test the route with postman, we will first login and get the token, we will then copy the token and paste it in the __Authorization__ section of the __Headers__ tab. We will then add the __Bearer__ keyword before the token.
+
+
+## POSTMAN
+***
+### environment
+you should also use environments on postman to avoid having to copy and paste the token every time you want to test the route.
+
+i.e: DEV, PROD, TEST
+
+### env variables/access_token
+you can also use global variables to store the token and use it in the headers section.
+
+
+__setting the env variable__
+```python
+pm.environment.set("access_token", pm.response.json().access_token)
+```
+
+__retreiving the env variable__
+```python
+{{access_token}}
+```
+***
