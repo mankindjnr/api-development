@@ -1,5 +1,6 @@
 from .database import Base
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, text
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, text, ForeignKey
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql.sqltypes import TIMESTAMP
 import datetime
 
@@ -11,7 +12,8 @@ class Post(Base):
     content = Column(String, nullable=False)
     published = Column(Boolean, server_default='TRUE', nullable=False)
     created = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
-    #updated = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    owner = relationship("User")
 
 class User(Base):
     __tablename__ = 'users'
@@ -20,4 +22,9 @@ class User(Base):
     email = Column(String(255), nullable=False, unique=True)
     password = Column(String(255), nullable=False)
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
-    #updated = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    phone_number = Column(String(255), nullable=True)
+
+class Vote(Base):
+    __tablename__ = "votes"
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    post_id = Column(Integer, ForeignKey("posts.id", ondelete="CASCADE"), primary_key=True)

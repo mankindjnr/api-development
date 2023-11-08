@@ -940,3 +940,272 @@ __retreiving the env variable__
 {{access_token}}
 ```
 ***
+
+# RELATIONSHIPS
+When we are setting up a foreign key so that all the __posts__ created get to store the creator we could use our schemas __PostCreate__ schema to ensure that the id is passed but in our case, we will use the token auth to extract this, this is because the only person allowed to create a post is one who is logged in, hence we will assign the logged in account the owner status of that post.
+    
+```python
+@router.post("/", status_code=status.HTTP_201_CREATED, response_model=schemas.PostResp)
+def create_post(post: schemas.PostCreate, db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user)):
+    new_post = models.Post(owner_id = current_user.id, **post.dict())
+
+    db.add(new_post)
+    db.commit()
+    db.refresh(new_post)
+    return new_post
+```
+
+We will then restrict the __delete__ options and __update__ routes so that only the owner of the post can delete or update the post.
+
+```python
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_post(id: int, db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user)):
+    deleted_post = db.query(models.Post).filter(models.Post.id == id)
+
+    if deleted_post.first() == None:
+        raise HTTPException(status_code=404, detail=f"Post of id {id} not found")
+
+    if deleted_post.first().owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You are not authorized to delete this post")
+
+    deleted_post.delete(synchronize_session=False)
+    db.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+```
+
+To return only the posts of the currently logged in user, we will use the __current_user__ variable to filter the posts.
+
+```python
+@router.get("/", response_model=list[schemas.PostResp])
+def get_my_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user)):
+    my_posts = db.query(models.Post).filter(models.Post.owner_id == current_user.id).all()
+    return my_posts
+```
+
+***
+say we are building a social media application, when users view another persons post, showing them their id will mean nothing to them, what users wants to see is, a username of handle of the person who created it. Since we already have a relationship between the post and the user where we store the owner_id in the post when its created, we can use that relationship to retrieve info about the owner using sqlalchemy.
+
+```python
+class Post(Base):
+    __tablename__ = 'posts'
+
+    id = Column(Integer, primary_key=True, nullable=False)
+    title = Column(String(255), nullable=False)
+    content = Column(String, nullable=False)
+    published = Column(Boolean, server_default='TRUE', nullable=False)
+    created = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text('now()'))
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    owner = relationship("User")
+```
+
+We have added the owner field and the relationship reference to the user model.
+To make sure  that information is sent back, we ahave to update our __postResp schema__ to include the owner field.
+
+```python
+class PostResp(PostBase):
+    id: int
+    created: datetime
+    owner_id: int
+    owner: UserResp
+```
+
+Now when there is a post response, the structure above will be used, and owner above is of type __UserResp__ which is a schema that defines the structure of the data that will be sent back to the user.
+
+***
+***
+
+# QUERY PARAMETERS
+They are used to filter data. They are passed in the url.
+
+Query parameters will help with api pagination. We will use the __limit__ and __offset__ query parameters to achieve this.
+
+### LIMIT
+
+```python
+@router.get("/", response_model=list[schemas.PostResp])
+def get_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user), limit: int = 10):
+    my_posts = db.query(models.Post).limit(limit).all()
+    return my_posts
+```
+
+here we have a limit parameter with a default value of ten, when a user does not pass a alue to the limit, the 10 posts will be displayed but when they pass a value, that value will be used.
+
+### SKIP/OFFSET
+Here a user can pass a value to the skip parameter and the number of posts skipped will be equal to the value passed.
+
+```python
+@router.get("/", response_model=list[schemas.PostResp])
+def get_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user), limit: int = 10, skip: int = 0):
+    my_posts = db.query(models.Post).limit(limit).offset(skip).all()
+    return my_posts
+```
+
+__pagination__
+These two will come in handy on the frontend consumer, when a user moves from page one to page two, and each page shows 5 items, on page two we should be able to skip the first 5 entries.
+
+### search
+The search keyword below will return all titles that contain the value of search in them.
+
+```python
+@router.get("/", response_model=list[schemas.PostResp])
+def get_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user), limit: int = 10,
+              skip: int = 0, search: Optional[str] = None):
+    my_posts = db.query(models.Post).filter(models.Post.title.contains(search)).limit(limit).offset(skip).all()
+    return my_posts
+```
+
+
+### using spaces in search
+When a user searches for a title with spaces, the spaces will be replaced with the __%__ sign.
+```{{URL}}/posts/?search=hello%20world```
+
+
+# VOTING SYSTEM
+We will create a voting system where users can vote on posts. We will create a table that will store the votes and the user who voted and the post that was voted on.
+
+one post can be liked by many users
+many users can like one post
+but
+one user can't like a post more than once
+
+### Composite Keys
+We will use composite keys to ensure that a user can't like a post more than once. A composite key is a key that is made up of two or more columns. In our case, the composite key will be the user_id and the post_id.
+
+i.e
+
+say we have a table with post_id and user_id, what composite keys does, is ensure the whole row is unique, so, if a user likes a post, the row will be unique, if they like it again, the row will not be unique and the database will throw an error.
+There can't be any other row that looks like the other.
+
+unlike a primary key which only ensures that the column is unique.(one element in the column is unique)
+
+```vote.py```
+```python
+from fastapi import FastAPI, Request, Response, status, APIRouter, Depends, HTTPException
+from .. import models, database, schemas, oauth2
+from sqlalchemy.orm import Session
+
+router = APIRouter(
+    prefix="/vote",
+    tags=["Vote"],
+)
+
+@router.post("/", status_code=status.HTTP_201_CREATED)
+def vote(vote: schemas.Vote, db: Session = Depends(database.get_db), current_user: int = Depends
+    (oauth2.get_current_user)):
+
+    vote_query = db.query(models.Vote).filter(models.Vote.post_id == vote.post_id, models.Vote.user_id == current_user.id)
+    
+    liked_post = vote_query.first()
+
+    if (vote.direction == 1):
+        if liked_post:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You already liked this post")
+        
+        new_vote = models.Vote(user_id=current_user.id, post_id=vote.post_id)
+        db.add(new_vote)
+        db.commit()
+
+        return {"detail": "Post liked"}
+    else:
+        if not liked_post:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You haven't liked this post")
+        
+        vote_query.delete(synchronize_session=False)
+        db.commit()
+
+        return {"detail": "Post unliked"}
+```
+
+We are goin to extract the id of the user from the token and use it to create the vote.
+
+We will use the __vote.direction__ to determine if the user is liking or unliking the post.
+
+We will use the __vote_query__ to check if the user has already liked the post, if they have, we will throw an error, if they haven't, we will create the vote.
+
+# JOINS
+We will use joins to get the posts that a user has liked.
+
+```sql
+SELECT * from posts left join users on posts.owner_id = users.id;
+
+select title, content, email from posts left join users on posts.owner_id = users.id;
+```
+__Explanation__:
+We are selecting all the columns from the posts table and we are joining the users table on the posts.owner_id and users.id columns.
+
+We are selecting the data from both tables and displaying it as one, we are using the common denominator being the __owner_id__ and __id__ columns.
+
+the owner_id is a foreign key that references the id of the users table, so, if they __owner_id__ in the posts table matches the __id__ in the users table then we will display the data from both tables.
+
+__We can use the joins to count the number of likes/vote each post have, we will need a __join, group by and count__ to achieve this.__
+
+```sql
+select posts.id, title, content, email, count(votes.id) from posts left join users on posts.owner_id = users.id left join votes on posts.id = votes.post_id group by posts.id, users.id;
+```
+
+### counting in the route
+```python
+@router.get("/")
+def get_posts(db: Session = Depends(get_db), current_user: int = Depends(oauth2.get_current_user), limit: int = 10,
+              skip: int = 0, search: Optional[str] = None):
+    my_posts = db.query(models.Post).filter(models.Post.title.contains(search)).limit(limit).offset(skip).all()
+    
+    num_likes = db.query(models.Post, func.count(models.Vote.post_id).label("votes")).join(models.Vote, models.Vote.post_id == models.Post.id, isouter=True).group_by(
+        models.Post.id).all()
+
+    return num_likes
+```
+
+Now the votes will be returned with the posts.
+
+
+
+# migrations with alembic
+```bash
+pip install alembic
+
+alembic init migrations
+alembic --help
+
+alembic revision -m "create posts table"
+alembic upgrade 6dc49806a1ba
+alembic upgrade head
+
+alembic revision -m "create votes table"
+alembic upgrade head # to upgrade to the latest migration
+
+alembic downgrade -1 # to undo the last migration
+alembic upgrade +2 # to upgrade to the next migration
+
+alembic revision --autogenerate -m "all tables" # to create a migration file for all the tables
+alembic upgrade head # to upgrade to the latest migration
+```
+
+# CORS
+Cross Origin Resource Sharing
+
+search for __CORS__ in the fastAPI documentation
+```python
+origins = []
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+```
+
+__allow_origins__ specifies the domain that are allowed to communicate to our api
+
+__allow_credentials__ specifies if the api should allow credentials to be passed to it.
+
+__allow_methods__ specifies the methods that are allowed to be used to communicate with our api. If yu have a public api, you may want to only allow users to get information from the apoi but not send to it, if this is the case, you only allow the __get__ method.
+
+__allow_headers__ specifies the headers that are allowed to be passed to the api.
+
+__For public api's, the origins can have a wild card __*__ to allow all domains to communicate with the api. But if the api is private, you can specify the domains that are allowed to communicate with the api.__
+
+__if the api is built for a cetain application, you want to configure the origins to only allow that application to communicate with the api only. any other origin will be blocked.__
