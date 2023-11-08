@@ -1209,3 +1209,7 @@ __allow_headers__ specifies the headers that are allowed to be passed to the api
 __For public api's, the origins can have a wild card __*__ to allow all domains to communicate with the api. But if the api is private, you can specify the domains that are allowed to communicate with the api.__
 
 __if the api is built for a cetain application, you want to configure the origins to only allow that application to communicate with the api only. any other origin will be blocked.__
+
+# DEPLOYING THE API
+I will check out the heroku deployment then deploy to render.
+remember to fix the environment var - if you do, you can wait till you get to docker section and deploy and image.
