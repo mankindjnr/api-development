@@ -9,11 +9,9 @@ from decouple import config
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
-SECRET_KEY = config('SECRET_KEY')
-print("--------")
-print(type(SECRET_KEY))
-ALGORITHM = config('ALGORITHM')
-ACCESS_TOKEN_EXPIRE_MINUTES = config('ACCESS_TOKEN_EXPIRE_MINUTES')
+SECRET_KEY = config('JWT_SECRET')
+ALGORITHM = config('JWT_ALGORITHM')
+ACCESS_TOKEN_EXPIRE_MINUTES = config('JWT_EXPIRE_MINUTES')
 
 # payload
 def create_access_token(data: dict):

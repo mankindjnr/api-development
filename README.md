@@ -1179,6 +1179,7 @@ alembic downgrade -1 # to undo the last migration
 alembic upgrade +2 # to upgrade to the next migration
 
 # use this two lines to generate the tables automatically - stress free
+alembic init migrations
 alembic revision --autogenerate -m "all tables" # to create a migration file for all the tables
 alembic upgrade head # to upgrade to the latest migration
 ```
