@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from typing import Optional
 from random import randint
+from fastapi.middleware.cors import CORSMiddleware
 from .routers import post, users, auth, vote
 
 from . import models

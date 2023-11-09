@@ -2,10 +2,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from decouple import config
-from .config import settings
 
-sqlalchemy_url = 'postgresql://postgres:mankindjnr@127.0.0.1/fastapi'
-#sqlalchemy_url = f"postgresql://{settings.username}:{settings.password}@{settings.hostname}/{settings.db_name}"
+DB_HOST = config('DB_HOST')
+DB_NAME = config('DB_NAME')
+DB_USER = config('DB_USER')
+DB_PASSWORD = config('DB_PASSWORD')
+DB_PORT = config('DB_PORT')
+
+# Construct the DATABASE_URL
+sqlalchemy_url = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+
 engine = create_engine(sqlalchemy_url)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

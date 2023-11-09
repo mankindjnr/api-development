@@ -1178,6 +1178,7 @@ alembic upgrade head # to upgrade to the latest migration
 alembic downgrade -1 # to undo the last migration
 alembic upgrade +2 # to upgrade to the next migration
 
+# use this two lines to generate the tables automatically - stress free
 alembic revision --autogenerate -m "all tables" # to create a migration file for all the tables
 alembic upgrade head # to upgrade to the latest migration
 ```
@@ -1187,6 +1188,8 @@ Cross Origin Resource Sharing
 
 search for __CORS__ in the fastAPI documentation
 ```python
+from fastapi.middleware.cors import CORSMiddleware
+
 origins = []
 
 app.add_middleware(
@@ -1212,4 +1215,4 @@ __if the api is built for a cetain application, you want to configure the origin
 
 # DEPLOYING THE API
 I will check out the heroku deployment then deploy to render.
-remember to fix the environment var - if you do, you can wait till you get to docker section and deploy and image.
+
