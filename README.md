@@ -1216,3 +1216,195 @@ __if the api is built for a cetain application, you want to configure the origin
 # DEPLOYING THE API
 I will check out the heroku deployment then deploy to render.
 
+
+
+
+**IMPORTANT**
+We never run alembic revisions on the production server, we only do that on the development server when we are staging the changes. 
+__On production we only push our code to github together with the revision contained in the alembic/revisions folder__
+__After pushing everything to github, we run the alembic upgrade head in the production server__
+
+***
+check out how you can run the commands in our render server or how to migrate your revisions on your cloud server hosting the postgres database you are using.
+***
+
+# DOCKERIZING OUR API
+We will also set up a postgres database in a docker container and connect to it from our api.
+
+```hub.docker.com```
+We are going to search for an offcial python image and use it to build our docker image. (choose one you built your api with)
+
+This images are standard images, they only have the python installed, this means that we are going to have to copy all our files to the docker image and install all the dependencies.
+
+To avoid that, we could write our wn image that will have all the dependencies we need.
+We are going to write our dockerfile and you can follow the example provided on the python docs on docker.hub
+
+
+```Dockerfile```
+```docker
+FROM python:3.10.12
+
+WORKDIR /usr/src/app
+
+COPY requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000" ]
+```
+
+__WORKDIR__ is the directory where the application will live and this step is optional, but you get to choose where you want your application to live.
+
+## BUILDING THE IMAGE
+The docker file is complete, now we build the image.
+
+if not root user, use sudo
+```bash
+docker build -t fastapi .
+
+docker image ls
+
+```
+
+__Now we can use the image built above to build a container__
+
+
+### docker compose | CONTAINERS
+Building a container invlolves running commands like __docker run__ and others but we can avoid doing all that by using docker compose, we write out our commands in a file and run them all at once.
+
+You start by soecifying the version of docker compose you are using, then you specify the services you want to run, in our case, we want to run the api and the database.
+
+```docker-compose.yml```
+```yml
+version: "3"
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+```
+
+```bash
+docker-compose up -d
+```
+
+run:
+```bash
+docker ps
+```
+This commands tells you the containers that are running or crashed. Check the status column.
+If ti requires the env variables
+
+```yml
+version: "3"
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    # env_file:
+    #   - .env
+    environment:
+      - DB_HOST=127.0.0.1
+      - DB_NAME=fastapi
+      - DB_USER=postgres
+      - DB_PASSWORD=mankindjnr
+      - DB_PORT=5432
+      - SECRET_KEY = "b7ffab7e88ff8ec8e6c258944ec6677542bd7a16431ef01c0b78aaea77b26e04"
+      - ALGORITHM = "HS256"
+      - ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+```
+We will tear down our current container and rebuild
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+This time around, it did not build an image, it used the image we had built earlier.
+But, if you made changes to the dockerfile, you can force it to build an image by adding the flag __--build__
+
+```bash
+docker-compose up -d --build
+```
+
+You can test if the container is up by running the following in postman or in the browser
+```
+localhost:8000
+```
+Whatever the response of the base route is, is what you will get.
+
+### DATABASE SETUP IN A CONTAINER
+spinning up an image of postgres
+__even when you are not dockerizing your image its good to use a container for your database__
+
+Foe this we will use the official postgres image found on docker hub.
+
+```docker-compose.yml```
+```yml
+version: "3"
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    # env_file:
+    #   - .env
+    environment:
+      - DB_HOST=postgres
+      - DB_NAME=fastapi
+      - DB_USER=postgres
+      - DB_PASSWORD=mankindjnr
+      - DB_PORT=5432
+      - SECRET_KEY="b7ffab7e88ff8ec8e6c258944ec6677542bd7a16431ef01c0b78aaea77b26e04"
+      - ALGORITHM="HS256"
+      - ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+  postgres:
+    image: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=mankindjnr
+      - POSTGRES_DB=fastapi
+    
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+
+volumes:
+  postgres_data:
+```
+
+__postgres__ is another service we are running, we are using the official postgres image and we are specifying the environment variables we want to use.
+
+__volumes__ they are used to persist data, if we don't use volumes, when we tear down the container, the data will be lost. We are using volumes to store the data in the postgres_data folder.
+
+We changed the db host from __127.0.0.1__ to __postgres__ since we are using a container for the database. It will then reference the postgres service we have created.
+
+```bash
+docker exec -it api-development_api_1 bash
+```
+
+
+# REPOSITORY FOR IMAGES
+We will use docker hub to store our images.
+
+create an account on docker hub and create a repository.
+
+With a repo, i could now push my image:
+To see the images  have built:
+```bash
+docker image ls
+```
+
+To push:
+login to docker hub
+```bash
+docker login
+```
+
+```bash
+sudo docker image tag api-development_api mankindjnr/apidev
+docker push mankindjnr/apidev
+```
